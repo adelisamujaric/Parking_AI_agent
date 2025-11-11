@@ -1,0 +1,26 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Dataset i slike
+dataset/
+*.jpg
+*.png
+*.jpeg
+*.zip
+
+# YOLO rezultati i modeli
+runs/
+*.pt
+
+# Virtualna okruženja
+venv/
+.venv/
+
+# IDE postavke (PyCharm, VSCode, Rider)
+.idea/
+.vscode/
+
+# Sistem i privremeni fajlovi
+.DS_Store
+Thumbs.db
