@@ -9,6 +9,8 @@ dataset/
 *.jpeg
 *.zip
 
+
+
 # YOLO rezultati i modeli
 runs/
 *.pt

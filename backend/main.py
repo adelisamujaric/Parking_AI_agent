@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form
@@ -9,10 +10,18 @@ from pydantic import BaseModel
 from backend.ocr import read_plate
 from backend.utils import crop_plate
 from ultralytics import YOLO
+import shutil
+from datetime import datetime
+
+# Folder za odbijene detekcije
+REJECTED_DIR = "backend/rejected"
+os.makedirs(os.path.join(REJECTED_DIR, "first"), exist_ok=True)
+os.makedirs(os.path.join(REJECTED_DIR, "zoom"), exist_ok=True)
 
 app = FastAPI()
 init_db()
 
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,6 +30,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Kreiraj uploads folder ako ne postoji
+UPLOAD_DIR = "backend/uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# YOLO model
 model = YOLO("backend/weights/best.pt")
 
 
@@ -37,7 +51,7 @@ def root():
 # --------------------------------------------------------
 @app.post("/detect")
 async def detect_image(file: UploadFile = File(...)):
-    temp_path = "backend/temp_image.jpg"
+    temp_path = os.path.join(UPLOAD_DIR, "temp_image.jpg")
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
@@ -64,7 +78,7 @@ async def detect_image(file: UploadFile = File(...)):
 # --------------------------------------------------------
 @app.post("/detect_plate")
 async def detect_plate(file: UploadFile = File(...)):
-    temp_path = "backend/temp_plate_source.jpg"
+    temp_path = os.path.join(UPLOAD_DIR, "temp_plate_source.jpg")
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
@@ -115,8 +129,7 @@ def get_driver(plate: str):
         }
 
     return {"error": "Driver not found"}
-
-
+#-------------------------------------------------------------------------
 # --------------------------------------------------------
 # ADD DRIVER
 # --------------------------------------------------------
@@ -223,13 +236,31 @@ def record_violation(d: Detektovano):
     conn.close()
     return {"message": "Prekršaj evidentiran."}
 
+@app.post("/reject_violation")
+def reject_violation(d: Detektovano):
+    """
+    Kopiraj slike u rejected folder za buduće treniranje modela
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Kopiraj prvu sliku
+    if d.slika1 and os.path.exists(d.slika1):
+        new_name = f"rejected_first_{timestamp}.jpg"
+        shutil.copy(d.slika1, os.path.join(REJECTED_DIR, "first", new_name))
+
+    # Kopiraj zoom sliku
+    if d.slika2 and os.path.exists(d.slika2):
+        new_name = f"rejected_zoom_{timestamp}.jpg"
+        shutil.copy(d.slika2, os.path.join(REJECTED_DIR, "zoom", new_name))
+
+    return {"message": "Odbijene slike sačuvane za treniranje."}
 
 # --------------------------------------------------------
 # FIRST IMAGE – CHECK VIOLATION
 # --------------------------------------------------------
 @app.post("/analyze_first_image")
 async def analyze_first_image(file: UploadFile = File(...)):
-    first_path = "backend/first_image.jpg"
+    first_path = os.path.join(UPLOAD_DIR, "first_image.jpg")
     with open(first_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
@@ -273,7 +304,7 @@ async def analyze_zoom_image(
     file: UploadFile = File(...),
     prekrsaj_id: int = Form(...)
 ):
-    zoom_path = "backend/zoom_image.jpg"
+    zoom_path = os.path.join(UPLOAD_DIR, "zoom_image.jpg")
     with open(zoom_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
@@ -321,6 +352,13 @@ async def analyze_zoom_image(
         "prekrsaj_opis": prek[0],
         "prekrsaj_kazna": prek[1],
         "prekrsaj_id": prekrsaj_id,
-        "slika1": "backend/first_image.jpg",
+        "slika1": os.path.join(UPLOAD_DIR, "first_image.jpg"),
         "slika2": zoom_path,
     }
+
+
+# --------------------------------------------------------
+# RUN SERVER
+# --------------------------------------------------------
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)

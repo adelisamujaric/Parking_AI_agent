@@ -3,8 +3,10 @@
 // ------------------------------------------------------------------
 const API_FIRST   = "http://127.0.0.1:8000/analyze_first_image";
 const API_ZOOM    = "http://127.0.0.1:8000/analyze_zoom_image";
-const API_CONFIRM = "http://127.0.0.1:8000/confirm_violation";
+const API_CONFIRM = "http://127.0.0.1:8000/record_violation";
 const API_DETECT  = "http://127.0.0.1:8000/detect";
+const API_REJECT = "http://127.0.0.1:8000/reject_violation";
+
 
 // ------------------------------------------------------------------
 // GLOBAL STATE
@@ -189,9 +191,9 @@ async function confirmViolation() {
 }
 
 // ------------------------------------------------------------------
-function rejectViolation() {
+/*function rejectViolation() {
     resetUI();
-}
+}*/
 
 // ------------------------------------------------------------------
 // UI HELPERS
@@ -358,4 +360,32 @@ function showDriverCard(driver, opis, kazna) {
             <p><b>Kazna:</b> ${kazna} KM</p>
         </div>
     `;
+}
+
+async function rejectViolation() {
+    // Ako postoje slike, pošalji ih na backend da se sačuvaju
+    if (detectedDriver && firstImagePath && secondImagePath) {
+        const payload = {
+            vozac_id: detectedDriver.vozac_id,
+            prekrsaj_id: currentViolationId,
+            slika1: firstImagePath,
+            slika2: secondImagePath
+        };
+
+        showSpinner();
+
+        await fetch(API_REJECT, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        hideSpinner();
+        showMessage("Detekcija odbačena i sačuvana za treniranje ✔", "orange");
+
+        // Čekaj 2 sekunde da korisnik vidi poruku
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    resetUI();
 }
