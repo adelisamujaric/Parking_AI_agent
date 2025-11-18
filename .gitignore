@@ -13,6 +13,10 @@ dataset/
 backend/rejected/
 backend/uploads/
 
+# YOLO model weights
+*.pt
+yolov8n.pt
+
 
 # YOLO rezultati i modeli
 runs/

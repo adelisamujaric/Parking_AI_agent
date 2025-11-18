@@ -96,8 +96,8 @@ async function analyzeFirstImage(file) {
 
     if (data.status === "OK") {
         showMessage("Nema prekršaja ✔", "green");
-        resetAfterOK();
-        return;
+        enableConfirmButtons(); // ← DODAJ OVO!
+        return; // Ne resetuj odmah, neka korisnik potvrdi
     }
 
     if (data.status === "NEEDS_ZOOM") {
@@ -112,16 +112,12 @@ async function analyzeFirstImage(file) {
 
         document.getElementById("imageInput").value = "";
         document.getElementById("previewImage").style.display = "none";
-
-        // NE pozivaj triggerUpload() automatski!
-        // Korisnik treba da klikne dugme "📸 Učitaj bližu sliku"
     }
 }
-
 // ------------------------------------------------------------------
 // 2️⃣ ANALYZE ZOOM IMAGE
 // ------------------------------------------------------------------
-async function analyzeZoomImage(file) {
+/*async function analyzeZoomImage(file) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("prekrsaj_id", currentViolationId);
@@ -165,12 +161,92 @@ async function analyzeZoomImage(file) {
     btn.style.background = "#00a86b";
 
     state = "FIRST";
+}*/
+
+async function analyzeZoomImage(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("prekrsaj_id", currentViolationId);
+
+    showSpinner();
+
+    let res = await fetch(API_ZOOM, { method: "POST", body: formData });
+    let data = await res.json();
+
+    await showSecondDetection(file);
+    await drawDetectionsOnImage("canvas2", "secondImage", file);
+
+    hideSpinner();
+
+    if (data.status === "NO_PLATE") {
+        showMessage("Tablica nije pronađena ❌", "red");
+        return;
+    }
+
+    if (data.status === "NO_DRIVER") {
+        showMessage(`Tablica: ${data.plate} – vozač nije u bazi ❌`, "red");
+        return;
+    }
+
+    // NOVO: Vozač ima rezervaciju - parkiranje OK
+    if (data.status === "OK_WITH_RESERVATION") {
+        showMessage(data.message, "green");
+        showDriverCard(
+            data.vozac,
+            "Parkiranje na rezervaciji",
+            "0 (Dozvoljeno)"
+        );
+        enableConfirmButtons();
+
+        let btn = document.getElementById("actionButton");
+        btn.textContent = "🔍 Analiziraj";
+        btn.style.background = "#00a86b";
+        state = "FIRST";
+        return;
+    }
+
+    if (data.status === "READY_TO_CONFIRM") {
+        detectedDriver = data.vozac;
+        firstImagePath = data.slika1;
+        secondImagePath = data.slika2;
+
+        showDriverCard(
+            data.vozac,
+            data.prekrsaj_opis,
+            data.prekrsaj_kazna
+        );
+
+        enableConfirmButtons();
+    }
+
+    let btn = document.getElementById("actionButton");
+    btn.textContent = "🔍 Analiziraj";
+    btn.style.background = "#00a86b";
+
+    state = "FIRST";
 }
 
 // ------------------------------------------------------------------
 // CONFIRM VIOLATION
 // ------------------------------------------------------------------
+
 async function confirmViolation() {
+    console.log("confirmViolation pozvana!");
+    console.log("State:", state);
+    console.log("currentViolationId:", currentViolationId);
+    console.log("detectedDriver:", detectedDriver);
+
+    // Ako nema prekršaja (još nismo stigli do ZOOM faze)
+    if (!currentViolationId || !detectedDriver) {
+        console.log("Nema prekršaja - resetujem UI");
+        alert("Potvrđeno: Pravilno parkiranje.");
+        resetUI();
+        return;
+    }
+
+    console.log("Ima prekršaj, šaljem u bazu...");
+
+    // Pošalji prekršaj u bazu
     const payload = {
         vozac_id: detectedDriver.vozac_id,
         prekrsaj_id: currentViolationId,
@@ -178,23 +254,30 @@ async function confirmViolation() {
         slika2: secondImagePath
     };
 
+    console.log("Payload:", payload);
+
     showSpinner();
 
-    let res = await fetch(API_CONFIRM, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    });
+    try {
+        let res = await fetch(API_CONFIRM, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
 
-    hideSpinner();
-    resetUI();
+        let data = await res.json();
+        console.log("Odgovor:", data);
+
+        hideSpinner();
+        //alert(data.message || "Prekršaj evidentiran.");
+        resetUI();
+    } catch (err) {
+        console.error("Greška:", err);
+        hideSpinner();
+        alert("Greška prilikom evidencije.");
+    }
 }
-
-// ------------------------------------------------------------------
-/*function rejectViolation() {
-    resetUI();
-}*/
-
+// -----------------------------------------------------------------
 // ------------------------------------------------------------------
 // UI HELPERS
 // ------------------------------------------------------------------

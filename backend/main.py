@@ -258,7 +258,7 @@ def reject_violation(d: Detektovano):
 # --------------------------------------------------------
 # FIRST IMAGE – CHECK VIOLATION
 # --------------------------------------------------------
-@app.post("/analyze_first_image")
+"""""@app.post("/analyze_first_image")
 async def analyze_first_image(file: UploadFile = File(...)):
     first_path = os.path.join(UPLOAD_DIR, "first_image.jpg")
     with open(first_path, "wb") as buffer:
@@ -338,6 +338,221 @@ async def analyze_zoom_image(
     if not driver:
         return {"status": "NO_DRIVER", "plate": plate_text}
 
+    return {
+        "status": "READY_TO_CONFIRM",
+        "plate": plate_text,
+        "vozac": {
+            "vozac_id": driver[0],
+            "ime": driver[1],
+            "tablica": driver[2],
+            "auto_tip": driver[3],
+            "invalid": bool(driver[4]),
+            "rezervacija": bool(driver[5])
+        },
+        "prekrsaj_opis": prek[0],
+        "prekrsaj_kazna": prek[1],
+        "prekrsaj_id": prekrsaj_id,
+        "slika1": os.path.join(UPLOAD_DIR, "first_image.jpg"),
+        "slika2": zoom_path,
+    }
+
+
+@app.post("/analyze_first_image")
+async def analyze_first_image(file: UploadFile = File(...)):
+    first_path = os.path.join(UPLOAD_DIR, "first_image.jpg")
+    with open(first_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    results = model(first_path)
+    boxes = results[0].boxes
+    class_names = model.names
+
+    detected_violation_class = None
+
+    for box in boxes:
+        cls_name = class_names[int(box.cls[0])]
+        # Proveri bilo koji prekršaj ILI parkiranje na rezervaciji
+        if cls_name.startswith("NepropisnoParkirano") or "rezerv" in cls_name.lower():
+            detected_violation_class = cls_name
+            break
+
+    if detected_violation_class is None:
+        return {"status": "OK", "message": "Nema prekršaja — pravilno parkirano."}
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT prekrsaj_id FROM prekrsaji WHERE opis = ?", (detected_violation_class,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return {"status": "OK", "message": "Nema prekršaja — klasa nije u bazi."}
+
+    return {
+        "status": "NEEDS_ZOOM",
+        "prekrsaj_id": row[0],
+        "detected_violation": detected_violation_class,
+        "message": "Približi se da očitamo tablicu."
+    }
+
+"""""
+
+
+@app.post("/analyze_first_image")
+async def analyze_first_image(file: UploadFile = File(...)):
+    first_path = os.path.join(UPLOAD_DIR, "first_image.jpg")
+    with open(first_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    results = model(first_path)
+    boxes = results[0].boxes
+    class_names = model.names
+
+    detected_violation_class = None
+    reservation_boxes = []
+    car_boxes = []
+
+    # Skupi sve bounding boxove
+    for box in boxes:
+        cls_name = class_names[int(box.cls[0])]
+        bbox = box.xyxy[0].tolist()  # [x1, y1, x2, y2]
+
+        if cls_name == "RezervacijaOznaka":
+            reservation_boxes.append(bbox)
+
+        if cls_name == "Auto":
+            car_boxes.append(bbox)
+
+        # Proveri standardne prekršaje
+        if cls_name.startswith("NepropisnoParkirano") or cls_name == "Parkiranje_na_rezervvisanom_mjestu":
+            detected_violation_class = cls_name
+            break
+
+    # Proveri da li je auto u istoj KOLONI kao rezervacijska oznaka
+    def is_car_aligned_with_reservation(car_bbox, res_bbox):
+        """Proveri da li se auto horizontalno preklapa sa oznakom"""
+        car_x1, car_y1, car_x2, car_y2 = car_bbox
+        res_x1, res_y1, res_x2, res_y2 = res_bbox
+
+        # Izračunaj centre
+        car_center_x = (car_x1 + car_x2) / 2
+        res_center_x = (res_x1 + res_x2) / 2
+
+        # Horizontalna udaljenost
+        horizontal_distance = abs(car_center_x - res_center_x)
+
+        # Auto treba biti ispod oznake (veći Y) i horizontalno blizu
+        # Tolerancija: 100 pixela na originalnoj slici
+        if car_y1 > res_y2 and horizontal_distance < 100:
+            return True
+        return False
+
+    # Proveri da li bilo koji auto odgovara bilo kojoj oznaci
+    car_on_reservation = False
+    for car_box in car_boxes:
+        for res_box in reservation_boxes:
+            if is_car_aligned_with_reservation(car_box, res_box):
+                car_on_reservation = True
+                break
+        if car_on_reservation:
+            break
+
+    # AKO JE AUTO NA REZERVACIJI - traži tablicu!
+    if car_on_reservation:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT prekrsaj_id FROM prekrsaji WHERE opis = ?", ("Parkiranje_na_rezervvisanom_mjestu",))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return {
+                "status": "NEEDS_ZOOM",
+                "prekrsaj_id": row[0],
+                "detected_violation": "Parkiranje_na_rezervvisanom_mjestu",
+                "message": "Auto na rezervaciji - provjera tablice 🅿️"
+            }
+
+    # Ako nema prekršaja
+    if detected_violation_class is None:
+        return {"status": "OK", "message": "Nema prekršaja — pravilno parkirano."}
+
+    # Standardna obrada drugih prekršaja
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT prekrsaj_id FROM prekrsaji WHERE opis = ?", (detected_violation_class,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return {"status": "OK", "message": "Nema prekršaja — klasa nije u bazi."}
+
+    return {
+        "status": "NEEDS_ZOOM",
+        "prekrsaj_id": row[0],
+        "detected_violation": detected_violation_class,
+        "message": "Približi se da očitamo tablicu."
+    }
+@app.post("/analyze_zoom_image")
+async def analyze_zoom_image(
+    file: UploadFile = File(...),
+    prekrsaj_id: int = Form(...)
+):
+    zoom_path = os.path.join(UPLOAD_DIR, "zoom_image.jpg")
+    with open(zoom_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    results = model(zoom_path)
+    boxes = results[0].boxes
+
+    plate_box = None
+    for box in boxes:
+        cls_name = model.names[int(box.cls[0])].lower()
+        if cls_name == "tablica":
+            plate_box = box.xyxy[0].tolist()
+            break
+
+    if not plate_box:
+        return {"status": "NO_PLATE"}
+
+    crop_path = crop_plate(zoom_path, plate_box)
+    plate_text = read_plate(crop_path) or "Unknown"
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM vozac WHERE tablica = ?", (plate_text,))
+    driver = cursor.fetchone()
+
+    cursor.execute("SELECT opis, kazna FROM prekrsaji WHERE prekrsaj_id = ?", (prekrsaj_id,))
+    prek = cursor.fetchone()
+
+    conn.close()
+
+    if not driver:
+        return {"status": "NO_DRIVER", "plate": plate_text}
+
+    # NOVA LOGIKA: Proveri da li je rezervacijsko mesto
+    if prek and "rezerv" in prek[0].lower():
+        # Proveri da li vozač IMA rezervaciju
+        if driver[5]:  # driver[5] je polje 'rezervacija'
+            # Vozač IMA rezervaciju - parkiranje je OK
+            return {
+                "status": "OK_WITH_RESERVATION",
+                "message": f"Vozač {driver[1]} ima rezervaciju - parkiranje dozvoljeno ✅",
+                "plate": plate_text,
+                "vozac": {
+                    "vozac_id": driver[0],
+                    "ime": driver[1],
+                    "tablica": driver[2],
+                    "auto_tip": driver[3],
+                    "invalid": bool(driver[4]),
+                    "rezervacija": bool(driver[5])
+                }
+            }
+        # else: Vozač NEMA rezervaciju - nastavi sa prikazom prekršaja
+
+    # Za sve prekršaje (uključujući parkiranje bez rezervacije)
     return {
         "status": "READY_TO_CONFIRM",
         "plate": plate_text,
