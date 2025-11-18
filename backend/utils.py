@@ -1,5 +1,4 @@
-import cv2
-
+import os
 import cv2
 
 def crop_plate(image_path, bbox, margin=15):
@@ -22,9 +21,8 @@ def crop_plate(image_path, bbox, margin=15):
 
     crop = img[y1:y2, x1:x2]
 
-    crop_path = "backend/temp_plate_crop.jpg"
+    # Save to uploads folder
+    crop_path = os.path.join("backend", "uploads", "temp_plate_crop.jpg")
     cv2.imwrite(crop_path, crop)
 
     return crop_path
-
-

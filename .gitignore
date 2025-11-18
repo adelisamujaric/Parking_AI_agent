@@ -9,6 +9,11 @@ dataset/
 *.jpeg
 *.zip
 
+# Backend folders
+backend/rejected/
+backend/uploads/
+
+
 # YOLO rezultati i modeli
 runs/
 *.pt
