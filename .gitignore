@@ -13,6 +13,8 @@ dataset/
 backend/rejected/
 backend/uploads/
 
+testing_material
+
 # YOLO model weights
 *.pt
 yolov8n.pt

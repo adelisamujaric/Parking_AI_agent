@@ -16,6 +16,7 @@ let currentViolationId = null;
 let detectedDriver = null;
 let firstImagePath = null;
 let secondImagePath = null;
+let isOnReservation = false;
 
 // ------------------------------------------------------------------
 // LOADING SPINNER
@@ -95,14 +96,15 @@ async function analyzeFirstImage(file) {
     hideSpinner();
 
     if (data.status === "OK") {
-        showMessage("Nema prekršaja ✔", "green");
-        enableConfirmButtons(); // ← DODAJ OVO!
-        return; // Ne resetuj odmah, neka korisnik potvrdi
+        showMessage(data.message || "Nema prekršaja ✔", "green");  // ← KORISTI data.message
+        enableConfirmButtons();
+        return;
     }
 
     if (data.status === "NEEDS_ZOOM") {
         currentViolationId = data.prekrsaj_id;
-        showMessage("Prekršaj detektovan – potrebno približavanje 📸", "orange");
+        isOnReservation = data.on_reservation || false;
+        showMessage(data.message, "orange");  // ← KORISTI data.message!
 
         let btn = document.getElementById("actionButton");
         btn.textContent = "📸 Učitaj bližu sliku";
@@ -114,58 +116,11 @@ async function analyzeFirstImage(file) {
         document.getElementById("previewImage").style.display = "none";
     }
 }
-// ------------------------------------------------------------------
-// 2️⃣ ANALYZE ZOOM IMAGE
-// ------------------------------------------------------------------
-/*async function analyzeZoomImage(file) {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("prekrsaj_id", currentViolationId);
-
-    showSpinner();
-
-    let res = await fetch(API_ZOOM, { method: "POST", body: formData });
-    let data = await res.json();
-
-    await showSecondDetection(file);
-    await drawDetectionsOnImage("canvas2", "secondImage", file);
-
-    hideSpinner();
-
-    if (data.status === "NO_PLATE") {
-        showMessage("Tablica nije pronađena ❌", "red");
-        return;
-    }
-
-    if (data.status === "NO_DRIVER") {
-        showMessage(`Tablica: ${data.plate} – vozač nije u bazi ❌`, "red");
-        return;
-    }
-
-    if (data.status === "READY_TO_CONFIRM") {
-        detectedDriver = data.vozac;
-        firstImagePath = data.slika1;
-        secondImagePath = data.slika2;
-
-        showDriverCard(
-            data.vozac,
-            data.prekrsaj_opis,
-            data.prekrsaj_kazna
-        );
-
-        enableConfirmButtons();
-    }
-
-    let btn = document.getElementById("actionButton");
-    btn.textContent = "🔍 Analiziraj";
-    btn.style.background = "#00a86b";
-
-    state = "FIRST";
-}*/
 
 async function analyzeZoomImage(file) {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("on_reservation", isOnReservation);
     formData.append("prekrsaj_id", currentViolationId);
 
     showSpinner();
@@ -239,7 +194,7 @@ async function confirmViolation() {
     // Ako nema prekršaja (još nismo stigli do ZOOM faze)
     if (!currentViolationId || !detectedDriver) {
         console.log("Nema prekršaja - resetujem UI");
-        alert("Potvrđeno: Pravilno parkiranje.");
+        alert("Potvrđeno: Detekcija potvrdjena.");
         resetUI();
         return;
     }
